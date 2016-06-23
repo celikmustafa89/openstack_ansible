@@ -1,0 +1,224 @@
+---
+cidr_networks:
+  container: 172.29.236.0/22
+  tunnel: 172.29.240.0/22
+  storage: 172.29.244.0/22
+
+used_ips:
+  - 172.29.236.1,172.29.236.100
+  - 172.29.236.100
+  - 172.29.240.1,172.29.240.100
+  - 172.29.244.1,172.29.244.100
+  - 172.29.248.1,172.29.248.100
+
+# Level: global_overrides (required)
+# Contains global options that require customization for a deployment. For
+# example, load balancer virtual IP addresses (VIP). This level also provides
+# a mechanism to override other options defined in the playbook structure.
+global_overrides:
+  internal_lb_vip_address: 172.29.236.11 # TODO: burasi duzgun ayarlanmali
+  external_lb_vip_address: "{{ bootstrap_host_public_address | default(ansible_default_ipv4.address) }}"
+  tunnel_bridge: "br-vxlan"
+  management_bridge: "br-mgmt"
+
+  # Level: provider_networks (required)
+  # List of container and bare metal networks on target hosts.
+  #
+  #   Level: network (required)
+  #   Defines a container or bare metal network. Create a level for each
+  #   network.
+  provider_networks:    
+    - network:
+
+        # Option: container_bridge (required, string)
+        # Name of unique bridge on target hosts to use for this network. Typical
+        #  values include 'br-mgmt', 'br-storage', 'br-vlan', 'br-vxlan', etc.
+        container_bridge: "br-mgmt"
+
+        # Option: container_type (required, string)
+        # Name of mechanism that connects interfaces in containers to the bridge
+        # on target hosts for this network. Typically 'veth'.
+        container_type: "veth"
+
+        # Option: container_interface (required, string)
+        # Name of unique interface in containers to use for this network.
+        # Typical values include 'eth1', 'eth2', etc.
+        # ama bizim makinler em'li oldugu icin bu kisim ayarlar farkli olacak.
+        container_interface: "eth1"  # TODO: burasi duzgun ayarlanmali
+
+        # Option: ip_from_q (optional, string)
+        # Name of network in 'cidr_networks' level to use for IP address pool. Only
+        # valid for 'raw' and 'vxlan' types.
+        ip_from_q: "container"
+
+        # Option: type (required, string)
+        # Type of network. Networks other than those for neutron such as
+        # management and storage typically use 'raw'. Neutron networks use
+        # 'flat', 'vlan', or 'vxlan'. Coincides with ML2 plug-in configuration
+        # options.
+        type: "vxlan"
+
+        # Option: group_binds (required, string)
+        # List of one or more Ansible groups that contain this
+        # network. For more information, see the openstack_environment.yml file.
+        # TODO: DIKKAT !!! bu kisima dikkatli bakilacak ve tekrar yapilacak.
+        group_binds:
+          - all_containers
+          - hosts
+
+        # Option: is_container_address (required, boolean)
+        # If true, the load balancer uses this IP address to access services
+        # in the container. Only valid for networks with 'ip_from_q' option.
+        is_container_address: true
+
+        # Option: is_ssh_address (required, boolean)
+        # If true, Ansible uses this IP address to access the container via SSH.
+        # Only valid for networks with 'ip_from_q' option.
+        is_ssh_address: true    
+    - network:
+        container_bridge: "br-storage"
+        container_type: "veth"
+        container_interface: "eth2"  # TODO: burasi duzgun ayarlanmali
+        ip_from_q: "storage"
+        type: "raw" # TODO: burasi duzgun ayarlanmali
+        group_binds:
+          - glance_api
+          - cinder_api
+          - cinder_volume
+          - nova_compute
+    - network:
+        container_bridge: "br-vxlan"
+        container_type: "veth"
+        container_interface: "eth10"  # TODO: burasi duzgun ayarlanmali
+        ip_from_q: "tunnel"
+        type: "vxlan"
+        range: "1:1000"
+        net_name: "vxlan"
+        group_binds:
+          - neutron_linuxbridge_agent
+    - network:
+        group_binds:
+          - neutron_linuxbridge_agent
+        container_bridge: "br-vlan"
+        container_type: "veth"
+        container_interface: "eth12"
+        host_bind_override: "em1"    #TODO: burasi duzgun ayarlanmali
+        type: "flat"
+        net_name: "flat"
+    - network:
+        group_binds:
+          - neutron_linuxbridge_agent
+        container_bridge: "br-vlan"
+        container_type: "veth"
+        container_interface: "eth11"
+        type: "vlan"
+        range: "1:1000"
+        net_name: "vlan"
+    - network:
+        group_binds:
+          - glance_api
+          - cinder_api
+          - cinder_volume
+          - nova_compute
+        type: "raw"
+        container_bridge: "br-storage"
+        container_interface: "eth2"
+        container_type: "veth"
+        ip_from_q: "storage"
+        static_routes:
+          - cidr: 10.176.0.0/12
+            gateway: 172.29.248.1
+    - network:
+        group_binds:
+          - glance_api
+          - cinder_api
+          - cinder_volume
+          - nova_compute
+        type: "raw"
+        container_bridge: "br-storage"
+        container_interface: "eth2"
+        container_type: "veth"
+        container_mtu: "9000"
+        ip_from_q: "storage"
+        static_routes:
+          - cidr: 10.176.0.0/12
+            gateway: 172.29.248.1
+
+# Level: shared-infra_hosts (required)
+# List of target hosts on which to deploy shared infrastructure services
+# including the Galera SQL database cluster, RabbitMQ, and Memcached. Recommend
+# three minimum target hosts for these services.
+shared-infra_hosts:
+  ansible01:
+    ip: 172.29.236.11
+  ansible02:
+    ip: 172.29.236.12
+  ansible03:
+    ip: 172.29.236.13
+
+repo-infra_hosts:
+  ansible01:
+    ip: 172.29.236.11
+  ansible02:
+    ip: 172.29.236.12
+  ansible03:
+    ip: 172.29.236.13
+    # If you choose not to implement repository target hosts, you must configure
+    # the 'openstack_repo_url' variable in the user_variables.yml file to
+    # contain the URL of a host with an existing repository.
+
+os-infra_hosts:
+  ansible01:
+    ip: 172.29.236.11
+  ansible02:
+    ip: 172.29.236.12
+  ansible03:
+    ip: 172.29.236.13
+
+identity_hosts:
+  ansible01:
+    ip: 172.29.236.11
+  ansible02:
+    ip: 172.29.236.12
+  ansible03:
+    ip: 172.29.236.13
+
+network_hosts:
+  ansible01:
+    ip: 172.29.236.11
+  ansible02:
+    ip: 172.29.236.12
+  ansible03:
+    ip: 172.29.236.13
+
+compute_hosts:
+  ansible05:
+    ip: 172.29.236.15
+
+storage-infra_hosts:
+  ansible01:
+    ip: 172.29.236.11
+  ansible02:
+    ip: 172.29.236.12
+  ansible03:
+    ip: 172.29.236.13
+
+# Level: storage_hosts (required)
+# List of target hosts on which to deploy the cinder volume service. Recommend
+# one minimum target host for this service. Typically contains target hosts
+# that do not reside in other levels.
+storage_hosts:
+  ansible06:
+    ip: 172.29.236.16
+    container_vars:
+      cinder_backends:
+        limit_container_types: cinder_volume
+        lvm:
+          volume_group: cinder-volumes
+          volume_driver: cinder.volume.drivers.lvm.LVMVolumeDriver
+          volume_backend_name: LVM_iSCSI
+          iscsi_ip_address: "172.29.236.16" # TODO: storage address diye geciyor dokumanda
+
+log_hosts:
+  ansible04:
+    ip: 172.29.236.14
